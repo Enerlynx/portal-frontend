@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Zap, TrendingUp, Cpu, RefreshCw, Building2, ChevronRight, Gauge, Activity, CalendarDays, Leaf, Home } from 'lucide-react'
+import { Zap, TrendingUp, Cpu, RefreshCw, ChevronRight, Gauge, Activity, CalendarDays, Leaf,Home, Building2 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/api/axios'
 import { useAutoRefresh } from '@/api/useAutoRefresh'
@@ -20,7 +20,7 @@ const T = {
 // ---- Types ----
 
 interface PortfolioSummary {
-  total_active_power_kw: number
+  total_active_power_kw: number | null
   total_energy_today_kwh: number | null
   total_energy_month_kwh: number | null  
   cuf_pct: number | null
@@ -28,8 +28,6 @@ interface PortfolioSummary {
   ac_capacity_kw?: number
   sites_online: number
   sites_total: number
-  household_sites_online?: number
-  household_sites_total?: number
   inverters_online: number
   inverters_total: number
   loggers_online?: number
@@ -222,7 +220,11 @@ function SiteGroups({ sites, showInstaller = false }: { sites: SiteSummary[]; sh
 // ============================================================
 
 function CustomerBlock({ customer }: { customer: CustomerSummary }) {
-  const totalPower = customer.sites.reduce((sum, s) => sum + (s.active_power_kw ?? 0), 0)
+  // null when no site reported power (Household at night) → "—", not 0.0
+  const hasPower = customer.sites.some((s) => s.active_power_kw != null)
+  const totalPower = hasPower
+    ? customer.sites.reduce((sum, s) => sum + (s.active_power_kw ?? 0), 0)
+    : null
   const hasEnergy = customer.sites.some((s) => s.energy_today_kwh !== null)
   const totalEnergy = hasEnergy
     ? customer.sites.reduce((sum, s) => sum + (s.energy_today_kwh ?? 0), 0)
@@ -240,12 +242,13 @@ function CustomerBlock({ customer }: { customer: CustomerSummary }) {
               {customer.customer_name}
             </h3>
             <p className="text-[11px] text-black/50 mt-0.5">
-              {customer.sites.length} site{customer.sites.length !== 1 ? 's' : ''}
+              {customer.sites.length} {customer.sites[0]?.category === 'HOUSEHOLD' ? 'household' : 'site'}{customer.sites.length !== 1 ? 's' : ''}
+            
             </p>
           </div>
         </div>
         <div className="flex items-center gap-4 flex-wrap text-[12px] font-semibold tabular-nums">
-          <span className="text-black">{totalPower.toFixed(1)}<span className="text-black/40 font-medium ml-1">kW</span></span>
+          <span className="text-black">{totalPower?.toFixed(1) ?? '—'}<span className="text-black/40 font-medium ml-1">kW</span></span>
           <span className="w-px h-4 bg-black/15" />
           <span className="text-black">
             {totalEnergy?.toLocaleString() ?? '—'}<span className="text-black/40 font-medium ml-1">kWh</span>
@@ -254,7 +257,7 @@ function CustomerBlock({ customer }: { customer: CustomerSummary }) {
           <span className="inline-flex items-center gap-1.5">
             <span className={`w-1.5 h-1.5 rounded-full ${allOnline ? 'bg-green-500' : 'bg-[#e17100]'}`} />
             <span className={allOnline ? 'text-green-700' : 'text-[#e17100]'}>
-              {sitesOnline}/{customer.sites.length}
+              {sitesOnline}/{customer.sites.length} 
             </span>
           </span>
         </div>
@@ -372,7 +375,8 @@ function SiteRow({ site, showInstaller = false }: { site: SiteSummary; showInsta
 // Main Page
 // ============================================================
 
-export default function PortfolioPage() {
+export default function PortfolioPage({ category = 'UTILITY' }: { category?: 'UTILITY' | 'HOUSEHOLD' }) {
+  const household = category === 'HOUSEHOLD'
   const [data, setData] = useState<PortfolioData | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -382,24 +386,16 @@ export default function PortfolioPage() {
   const groupByCustomer = user?.role !== 'CUSTOMER'
   const allSites = data?.customers.flatMap((c) => c.sites) ?? []
 
-  // Anything that is not HOUSEHOLD stays in the normal list (covers future categories)
-  const utilityCustomers = (data?.customers ?? [])
-    .map((c) => ({ ...c, sites: c.sites.filter((s) => s.category !== 'HOUSEHOLD') }))
-    .filter((c) => c.sites.length > 0)
-  const householdCustomers = (data?.customers ?? [])
-    .map((c) => ({ ...c, sites: c.sites.filter((s) => s.category === 'HOUSEHOLD') }))
-    .filter((c) => c.sites.length > 0)
-
   const fetchOverview = useCallback(async () => {
     try {
-      const res = await api.get<PortfolioData>('/influx/portfolio/overview/')
+      const res = await api.get<PortfolioData>(`/influx/portfolio/overview/?category=${category}`)
       setData(res.data)
     } catch (err) {
       console.error('Portfolio overview error:', err)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [category])
 
   useEffect(() => { fetchOverview() }, [fetchOverview])
 
@@ -412,13 +408,12 @@ export default function PortfolioPage() {
   const fleet = data?.portfolio_summary
 
   const siteCount = fleet?.sites_total ?? 0
-  const householdCount = fleet?.household_sites_total ?? 0
-  // Hide the utility count/section only for a household-only login
-  const showUtility = siteCount > 0 || householdCount === 0
+  const noun = household ? 'household' : 'site'
 
-  const fleetUtil = fleet?.ac_capacity_kw
+  // null when no site reported power (Household at night): show "—", not 0%
+  const fleetUtil = fleet?.ac_capacity_kw && fleet.total_active_power_kw != null
     ? Math.round((fleet.total_active_power_kw / fleet.ac_capacity_kw) * 100)
-    : 0
+    : null
 
   const fmtKwh = (v?: number | null) =>
     v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 0 })
@@ -468,16 +463,17 @@ export default function PortfolioPage() {
           <div className="flex items-stretch gap-3">
             <span className="w-1 rounded-full bg-[#e17100] shrink-0 self-stretch" />
             <div className="min-w-0">
-              <p className={T.eyebrow}>{groupByCustomer ? 'Portfolio Overview' : 'Your Sites'}</p>
-              <h1 className={`${T.siteH1} mt-2`}>{data?.scope_name ?? 'All Sites'}</h1>
+              <p className={T.eyebrow}>
+                {household
+                  ? (groupByCustomer ? 'Households Overview' : 'Your Households')
+                  : (groupByCustomer ? 'Portfolio Overview' : 'Your Sites')}
+              </p>
+              <h1 className={`${T.siteH1} mt-2`}>{data?.scope_name ?? (household ? 'All Households' : 'All Sites')}</h1>
               <p className={`${T.meta} text-black/50 mt-2`}>
                 {groupByCustomer && (
                   <>{data?.customers.length ?? 0} customer{(data?.customers.length ?? 0) !== 1 ? 's' : ''} · </>
                 )}
-                                {[
-                  showUtility && `${siteCount} site${siteCount !== 1 ? 's' : ''}`,
-                  householdCount > 0 && `${householdCount} household${householdCount !== 1 ? 's' : ''}`,
-                ].filter(Boolean).join(' · ')}
+                {siteCount} {noun}{siteCount !== 1 ? 's' : ''}
               </p>
             </div>
           </div>
@@ -509,17 +505,17 @@ export default function PortfolioPage() {
                   <div className="mt-5">
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-[11px] text-black/50 font-medium">Capacity utilisation</span>
-                      <span className="text-[12px] font-semibold text-[#e17100] tabular-nums">{fleetUtil}%</span>
+                      <span className="text-[12px] font-semibold text-[#e17100] tabular-nums">{fleetUtil != null ? `${fleetUtil}%` : '—'}</span>
                     </div>
                     <div className="h-2 bg-black/[0.06] rounded-full overflow-hidden">
-                      <div className="h-full rounded-full bg-[#e17100]" style={{ width: `${fleetUtil}%` }} />
+                      <div className="h-full rounded-full bg-[#e17100]" style={{ width: `${fleetUtil ?? 0}%` }} />
                     </div>
                     <p className="text-[11px] text-black/40 mt-1.5 tabular-nums">
                       of {fleet.ac_capacity_kw.toLocaleString()} kW AC capacity
                     </p>
                   </div>
                 ) : (
-                  <p className="text-[12px] text-[#497d00] font-semibold mt-3">Live across all sites</p>
+                  <p className="text-[12px] text-[#497d00] font-semibold mt-3">Live across all {noun}s</p>
                 )}
 
                 {/* Energy strip: 2 items now, 3 columns on desktop once CO₂ is added */}
@@ -555,35 +551,20 @@ export default function PortfolioPage() {
               </span>
             </div>
 
-            {showUtility && (
-              <div className="flex items-center justify-between py-3.5 gap-4">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <Building2 size={15} className="text-black/40 shrink-0" strokeWidth={2} />
-                  <span className={T.eyebrow}>Sites Online</span>
-                </div>
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  <span className={T.metricL}>
-                    {fleet?.sites_online ?? '—'}<span className={`${T.unit} ml-1`}>/ {fleet?.sites_total ?? '—'}</span>
-                  </span>
-                  {fleet && <HealthFooter online={fleet.sites_online} total={fleet.sites_total} />}
-                </div>
+            <div className="flex items-center justify-between py-3.5 gap-4">
+              <div className="flex items-center gap-2.5 min-w-0">
+                {household
+                  ? <Home size={15} className="text-black/40 shrink-0" strokeWidth={2} />
+                  : <Building2 size={15} className="text-black/40 shrink-0" strokeWidth={2} />}
+                <span className={T.eyebrow}>{household ? 'Households Online' : 'Sites Online'}</span>
               </div>
-            )}
-
-            {householdCount > 0 && (
-              <div className="flex items-center justify-between py-3.5 gap-4">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <Home size={15} className="text-black/40 shrink-0" strokeWidth={2} />
-                  <span className={T.eyebrow}>Households Online</span>
-                </div>
-                <div className="flex flex-col items-end gap-1 shrink-0">
-                  <span className={T.metricL}>
-                    {fleet?.household_sites_online ?? '—'}<span className={`${T.unit} ml-1`}>/ {householdCount}</span>
-                  </span>
-                  <HealthFooter online={fleet?.household_sites_online ?? 0} total={householdCount} />
-                </div>
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <span className={T.metricL}>
+                  {fleet?.sites_online ?? '—'}<span className={`${T.unit} ml-1`}>/ {fleet?.sites_total ?? '—'}</span>
+                </span>
+                {fleet && <HealthFooter online={fleet.sites_online} total={fleet.sites_total} />}
               </div>
-            )}
+            </div>
 
             <div className="flex items-center justify-between py-3.5 gap-4">
               <div className="flex items-center gap-2.5 min-w-0">
@@ -623,54 +604,32 @@ export default function PortfolioPage() {
         </div>
       </section>
 
-      {/* ============ CUSTOMERS (utility) ============ */}
-      {(utilityCustomers.length > 0 || householdCustomers.length === 0) && (
-        <>
-          <Divider />
-          <section className="pt-8 space-y-5">
-            <SectionHeader
-              title={groupByCustomer ? 'Customers' : 'Sites'}
-              meta={groupByCustomer ? 'Sites grouped by customer' : 'Select a site to view its plant overview'}
-              accent="orange"
-            />
+        {/* ============ SITES ============ */}
+      <Divider />
+      <section className="pt-8 space-y-5">
+        <SectionHeader
+          title={household
+            ? (groupByCustomer ? 'Buildings' : 'Households')
+            : (groupByCustomer ? 'Customers' : 'Sites')}
+          meta={household
+            ? (groupByCustomer ? 'Households grouped by building' : 'Select a household to view its system')
+            : (groupByCustomer ? 'Sites grouped by customer' : 'Select a site to view its plant overview')}
+          accent="orange"
+        />
 
-            {groupByCustomer
-              ? utilityCustomers.map((customer) => (
-                  <CustomerBlock key={customer.customer_id} customer={customer} />
-                ))
-              : utilityCustomers.length > 0 && (
-                  <FlatSiteList sites={utilityCustomers.flatMap((c) => c.sites)} />
-                )}
+        {groupByCustomer
+          ? data?.customers.map((customer) => (
+              <CustomerBlock key={customer.customer_id} customer={customer} />
+            ))
+          : allSites.length > 0 && <FlatSiteList sites={allSites} />}
 
-            {allSites.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-40 gap-2">
-                <Gauge size={22} className="text-black/25" />
-                <p className={`${T.meta} text-black/50`}>No sites found.</p>
-              </div>
-            )}
-          </section>
-        </>
-      )}
-
-      {/* ============ HOUSEHOLD ============ */}
-      {householdCustomers.length > 0 && (
-        <div className={utilityCustomers.length > 0 ? 'mt-10' : ''}>
-          <Divider />
-          <section className="pt-8 space-y-5">
-            <SectionHeader
-              title="Household"
-              meta={groupByCustomer ? 'Owners grouped by building' : 'Select an owner to view their system'}
-              accent="orange"
-            />
-
-            {groupByCustomer
-              ? householdCustomers.map((customer) => (
-                  <CustomerBlock key={customer.customer_id} customer={customer} />
-                ))
-              : <FlatSiteList sites={householdCustomers.flatMap((c) => c.sites)} />}
-          </section>
-        </div>
-      )}
+        {allSites.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-40 gap-2">
+            <Gauge size={22} className="text-black/25" />
+            <p className={`${T.meta} text-black/50`}>No {noun}s found.</p>
+          </div>
+        )}
+      </section>
 
       
     </div>

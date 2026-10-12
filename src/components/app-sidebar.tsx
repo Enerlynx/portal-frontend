@@ -1,4 +1,4 @@
-import { LayoutDashboard, AudioWaveform, Factory, AlertTriangle, Gauge, GitMerge, LineChart, Building2, CloudSun, ArrowLeft, FileBarChart2 } from 'lucide-react'
+import { LayoutDashboard, AudioWaveform, Factory, AlertTriangle, Gauge, GitMerge, LineChart, Building2, CloudSun, ArrowLeft, FileBarChart2, Home } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import {
   Sidebar,
@@ -45,9 +45,18 @@ export function AppSidebar() {
     if (isMobile) setOpenMobile(false)
   }
 
-  // Multi-site users can climb back out to the portfolio; single-site users have
-  // nowhere to go, so the link would be a dead end.
-  const showPortfolioLink = selectableSites.length > 1
+  // One portfolio link per category. A category's link shows when the user has
+  // more than one site of it, or has both kinds (so they can switch).
+  const householdCount = selectableSites.filter((s) => s.category === 'HOUSEHOLD').length
+  const utilityCount = selectableSites.length - householdCount
+  const hasBoth = utilityCount > 0 && householdCount > 0
+  // Inside a site, only the back-link to that site's own portfolio
+  const portfolioLinks = [
+    { key: 'UTILITY',   to: '/portfolio',  icon: Building2, show: utilityCount > 1 || hasBoth,
+      label: site ? 'All Sites' : hasBoth ? 'Utility Sites' : 'Portfolio' },
+    { key: 'HOUSEHOLD', to: '/households', icon: Home,      show: householdCount > 1 || hasBoth,
+      label: site ? 'All Households' : 'Households' },
+  ].filter((l) => l.show && (!site || (site.category === 'HOUSEHOLD') === (l.key === 'HOUSEHOLD')))
 
   const inverters = devices
     .filter((d) => d.device_type === 'INVERTER' && d.is_active)
@@ -85,22 +94,24 @@ export function AppSidebar() {
       <SidebarContent>
 
         {/* Portfolio / back-out */}
-        {showPortfolioLink && (
+        {portfolioLinks.length > 0 && (
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild>
-                    <NavLink
-                      to="/portfolio"
-                      onClick={closeOnMobile}
-                      className={({ isActive }) => (isActive ? NAV_ACTIVE : NAV_INACTIVE)}
-                    >
-                      {site ? <ArrowLeft size={16} /> : <Building2 size={16} />}
-                      <span className="text-[13px]">{site ? 'All Sites' : 'Portfolio'}</span>
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
+                {portfolioLinks.map((l) => (
+                  <SidebarMenuItem key={l.key}>
+                    <SidebarMenuButton asChild>
+                      <NavLink
+                        to={l.to}
+                        onClick={closeOnMobile}
+                        className={({ isActive }) => (isActive ? NAV_ACTIVE : NAV_INACTIVE)}
+                      >
+                        {site ? <ArrowLeft size={16} /> : <l.icon size={16} />}
+                        <span className="text-[13px]">{l.label}</span>
+                      </NavLink>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

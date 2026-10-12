@@ -57,7 +57,9 @@ function HomeResolver() {
     const only = selectableSites[0]
     return <Navigate to={`/sites/${only.id}/${only.category === 'HOUSEHOLD' ? 'household' : 'plant'}`} replace />
   }
-  return <Navigate to="/portfolio" replace />
+  // Household-only users land on their own portfolio; everyone else on the utility one
+  const onlyHousehold = selectableSites.every((s) => s.category === 'HOUSEHOLD')
+  return <Navigate to={onlyHousehold ? '/households' : '/portfolio'} replace />
 }
 
 // Guards every site-scoped route, and forces a full remount on site change.
@@ -109,7 +111,8 @@ export default function App() {
         <Route element={<AppLayout />}>
           {/* Site-less routes */}
           <Route path="/" element={<HomeResolver />} />
-          <Route path="/portfolio" element={<PortfolioPage />} />
+          <Route path="/portfolio" element={<PortfolioPage key="utility" category="UTILITY" />} />
+          <Route path="/households" element={<PortfolioPage key="household" category="HOUSEHOLD" />} />
           <Route path="/profile" element={<UserPage />} />
 
           {/* Site-scoped routes */}
