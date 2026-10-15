@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Zap, TrendingUp, Cpu, RefreshCw, ChevronRight, Gauge, Activity, CalendarDays, Leaf,Home, Building2 } from 'lucide-react'
+import { Zap, TrendingUp, Cpu, RefreshCw, ChevronRight, Gauge, Activity, CalendarDays, Leaf,Home, Building2, Search, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/api/axios'
 import { useAutoRefresh } from '@/api/useAutoRefresh'
@@ -158,7 +158,7 @@ function SectionHeader({
         </div>
       </div>
       {actions && (
-        <div className="flex items-center gap-2 ml-auto shrink-0">{actions}</div>
+        <div className="flex items-center gap-2 w-full sm:w-auto sm:ml-auto sm:shrink-0">{actions}</div>
       )}
     </div>
   )
@@ -386,6 +386,22 @@ export default function PortfolioPage({ category = 'UTILITY' }: { category?: 'UT
   const groupByCustomer = user?.role !== 'CUSTOMER'
   const allSites = data?.customers.flatMap((c) => c.sites) ?? []
 
+  const navigate = useNavigate()
+  const [query, setQuery] = useState('')
+  const q = query.trim().toLowerCase()
+
+  // Filter, not highlight: non-matching sites disappear, matching rows stay whole.
+  // Admin/installer: a customer (or building) name match keeps all its sites.
+  const visibleCustomers = (data?.customers ?? [])
+    .map((c) => ({
+      ...c,
+      sites: !q || (groupByCustomer && c.customer_name.toLowerCase().includes(q))
+        ? c.sites
+        : c.sites.filter((s) => s.site_name.toLowerCase().includes(q)),
+    }))
+    .filter((c) => c.sites.length > 0)
+  const visibleSites = visibleCustomers.flatMap((c) => c.sites)
+
   const fetchOverview = useCallback(async () => {
     try {
       const res = await api.get<PortfolioData>(`/influx/portfolio/overview/?category=${category}`)
@@ -604,9 +620,11 @@ export default function PortfolioPage({ category = 'UTILITY' }: { category?: 'UT
         </div>
       </section>
 
-        {/* ============ SITES ============ */}
+      {/* ============ SITES ============ */}
       <Divider />
+      
       <section className="pt-8 space-y-5">
+        
         <SectionHeader
           title={household
             ? (groupByCustomer ? 'Buildings' : 'Households')
@@ -614,14 +632,59 @@ export default function PortfolioPage({ category = 'UTILITY' }: { category?: 'UT
           meta={household
             ? (groupByCustomer ? 'Households grouped by building' : 'Select a household to view its system')
             : (groupByCustomer ? 'Sites grouped by customer' : 'Select a site to view its plant overview')}
-          accent="orange"
+            accent="orange"
+          actions={allSites.length > 0 && (
+            <div className="flex items-center gap-3 w-full sm:w-auto">
+              {q && (
+                <span className="order-2 sm:order-1 text-[12px] text-black/50 tabular-nums whitespace-nowrap">
+                  {visibleSites.length} of {allSites.length} {noun}s
+                </span>
+              )}
+              <div className="relative flex-1 sm:flex-none order-1 sm:order-2">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-black/40 pointer-events-none" />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setQuery('')
+                    if (e.key === 'Enter' && visibleSites.length === 1) {
+                      const s = visibleSites[0]
+                      navigate(s.category === 'HOUSEHOLD' ? `/sites/${s.site_id}/household` : `/sites/${s.site_id}/plant`)
+                    }
+                  }}
+                  placeholder={groupByCustomer
+                    ? (household ? 'Search households or buildings' : 'Search sites or customers')
+                    : `Search ${noun}s`}
+                  className="h-9 w-full sm:w-64 pl-8 pr-8 border border-black/25 rounded-lg text-[13px] text-black placeholder:text-black/35 focus:outline-none focus:border-black"
+                />
+                {query && (
+                  <button
+                    type="button"
+                    onClick={() => setQuery('')}
+                    aria-label="Clear search"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-black/40 hover:text-black"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         />
 
         {groupByCustomer
-          ? data?.customers.map((customer) => (
+          ? visibleCustomers.map((customer) => (
               <CustomerBlock key={customer.customer_id} customer={customer} />
             ))
-          : allSites.length > 0 && <FlatSiteList sites={allSites} />}
+          : visibleSites.length > 0 && <FlatSiteList sites={visibleSites} />}
+
+        {allSites.length > 0 && visibleSites.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-40 gap-2">
+            <Search size={22} className="text-black/25" />
+            <p className={`${T.meta} text-black/50`}>No {noun}s match "{query.trim()}"</p>
+          </div>
+        )}
 
         {allSites.length === 0 && (
           <div className="flex flex-col items-center justify-center h-40 gap-2">
